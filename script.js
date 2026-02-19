@@ -16,6 +16,7 @@ const currentTrackEl = document.getElementById('currentTrack');
 let playlist = [];
 let currentTrackIndex = -1;
 let isPlaying = false;
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 // Initialize
 function init() {
@@ -39,6 +40,7 @@ function setupEventListeners() {
     audioPlayer.addEventListener('timeupdate', updateProgress);
     audioPlayer.addEventListener('loadedmetadata', updateDuration);
     audioPlayer.addEventListener('ended', playNext);
+    audioPlayer.addEventListener('error', handleAudioError);
     
     // Control buttons
     playBtn.addEventListener('click', togglePlay);
@@ -78,18 +80,40 @@ function handleFileSelect(e) {
 
 // Handle files
 function handleFiles(files) {
+    let validFiles = 0;
+    let invalidFiles = 0;
+    
     for (let file of files) {
-        if (file.type === 'audio/mp3' || file.type === 'audio/mpeg') {
+        // Check file size
+        if (file.size > MAX_FILE_SIZE) {
+            console.warn(`File ${file.name} exceeds 50MB limit`);
+            invalidFiles++;
+            continue;
+        }
+        
+        // Check file type using multiple methods
+        const isMp3 = checkIfMp3(file);
+        
+        if (isMp3) {
             const track = {
                 name: file.name.replace(/\.[^/.]+$/, ''),
                 file: file,
                 url: URL.createObjectURL(file)
             };
             playlist.push(track);
+            validFiles++;
+        } else {
+            console.warn(`File ${file.name} is not a valid MP3 file`);
+            invalidFiles++;
         }
     }
     
-    if (playlist.length > 0) {
+    // Show feedback for invalid files
+    if (invalidFiles > 0) {
+        showNotification(`Skipped ${invalidFiles} invalid file(s)`, 'warning');
+    }
+    
+    if (validFiles > 0) {
         renderPlaylist();
         
         // If no track is currently playing, start the first one
@@ -97,6 +121,43 @@ function handleFiles(files) {
             loadTrack(0);
         }
     }
+}
+
+// Check if file is MP3
+function checkIfMp3(file) {
+    // Check MIME type
+    const validMimeTypes = [
+        'audio/mp3',
+        'audio/mpeg',
+        'audio/x-mpeg',
+        'audio/mpeg3',
+        'audio/mpg',
+        'audio/x-mpg',
+        'audio/x-mpeg-3'
+    ];
+    
+    if (validMimeTypes.includes(file.type)) {
+        return true;
+    }
+    
+    // Check file extension as fallback
+    const fileName = file.name.toLowerCase();
+    const validExtensions = ['.mp3', '.mp2', '.mpga', '.mpg', '.mpeg'];
+    
+    return validExtensions.some(ext => fileName.endsWith(ext));
+}
+
+// Show notification
+function showNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
 }
 
 // Render playlist
@@ -171,9 +232,14 @@ function loadTrack(index) {
 
 // Play track
 function playTrack() {
-    audioPlayer.play();
-    playBtn.textContent = '⏸';
-    isPlaying = true;
+    try {
+        audioPlayer.play();
+        playBtn.textContent = '⏸';
+        isPlaying = true;
+    } catch (error) {
+        console.error('Error playing audio:', error);
+        showNotification('Error playing audio file', 'error');
+    }
 }
 
 // Pause track
@@ -188,6 +254,8 @@ function togglePlay() {
     if (currentTrackIndex === -1) {
         if (playlist.length > 0) {
             loadTrack(0);
+        } else {
+            showNotification('Please add MP3 files to the playlist', 'warning');
         }
         return;
     }
@@ -228,6 +296,13 @@ function updateProgress() {
 // Update duration
 function updateDuration() {
     durationEl.textContent = formatTime(audioPlayer.duration);
+}
+
+// Handle audio error
+function handleAudioError() {
+    console.error('Audio player error:', audioPlayer.error);
+    showNotification('Error with audio file', 'error');
+    pauseTrack();
 }
 
 // Seek to position
